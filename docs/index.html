@@ -3,9 +3,287 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>サンプルのドキュメント</title>
+    <title>坪内先生討伐ゲーム</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            overflow: hidden;
+        }
+        canvas {
+            background-color: #ddd;
+            display: block;
+            margin: 20px auto;
+            border: 2px solid #000;
+        }
+        #status {
+            font-size: 20px;
+            margin: 10px;
+        }
+    </style>
 </head>
 <body>
-    Github Pagesで見えるかな?
+
+    <h1>坪内先生討伐ゲーム</h1>
+    <p id="status">攻撃力: <span id="power">10</span></p>
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <p>マウスポインターで移動<br>世界のすべてに絶望し、血の涙を流す坪内先生を討伐せよ！</p>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const powerDisplay = document.getElementById("power");
+
+        let player = { x: 180, y: 500, width: 40, height: 40, power: 10, speed: 5 };
+        let gates = [];
+        let boss = { x: 150, y: -700, width: 100, height: 100, hp: Math.floor(Math.random() * 401) + 100, speed: 3, direction: 1 };
+        let bossShots = [];
+        let gameOver = false;
+        let scrollSpeed = 5;
+        let effects = [];
+        let shotInterval = 20; // ボスの弾の発射間隔（3倍速）
+        let shotTimer = 0;
+        // プレイヤーのスムーズ移動を管理する変数
+        let playerTargetX = player.x;
+        let playerTargetY = player.y;
+        let moveSpeed = 15; // プレイヤーが追従する速度
+        // プレイヤーの画像を読み込む
+        let playerImage = new Image();
+        playerImage.src = "DSC01367-494x330 2.png"; // プレイヤーの画像ファイルパスを指定
+        // ボスの画像を読み込む
+        let bossImage = new Image();
+        bossImage.src = "DSC01367-494x330 1.png"; // ボスの画像ファイルパスを指定
+
+        // 画像がロードされる前に描画を試みないようにします
+        let playerImageLoaded = false;
+        let bossImageLoaded = false;
+
+        playerImage.onload = function() {
+            playerImageLoaded = true;
+        };
+        bossImage.onload = function() {
+            bossImageLoaded = true;
+        };
+
+        function createGate(y) {
+            let gateType;
+            let amount;
+
+            let rand = Math.random();
+            if (rand < 0.6) {
+                gateType = Math.random() > 0.5 ? "increase" : "decrease";
+                amount = Math.floor(Math.random() * 15) + 5;
+            } else if (rand < 0.7) {
+                gateType = "multiply";
+                amount = 2;
+            } else if (rand < 0.8) {
+                gateType = "divide";
+                amount = 2;
+            } else {
+                gateType = Math.random() > 0.5 ? "increase" : "decrease";
+                amount = Math.floor(Math.random() * 10) + 3;
+            }
+
+            gates.push({
+                x: Math.random() * 300 + 50,
+                y: y,
+                width: 100,
+                height: 20,
+                type: gateType,
+                amount: amount,
+                color: gateType === "increase" ? "blue"
+                      : gateType === "decrease" ? "red"
+                      : gateType === "multiply" ? "purple"
+                      : "orange"
+            });
+        }
+        // マウスポインタ―の位置にプレイヤーを移動させるイベントリスナー
+        canvas.addEventListener("mousemove", (e) => {
+            // canvasの位置を考慮してマウスの座標を取得
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // プレイヤーのターゲット位置をマウスポインタ―の位置に設定
+            playerTargetX = mouseX - player.width / 2;
+            playerTargetY = mouseY - player.height / 2;
+        });
+
+        // プレイヤーを追従させる移動関数
+        function movePlayer() {
+            // プレイヤーの現在位置とターゲット位置をスムーズに移動させる
+            if (Math.abs(player.x - playerTargetX) > moveSpeed) {
+                player.x += (playerTargetX - player.x) * moveSpeed / Math.abs(player.x - playerTargetX);
+            } else {
+                player.x = playerTargetX;
+            }
+
+            if (Math.abs(player.y - playerTargetY) > moveSpeed) {
+                player.y += (playerTargetY - player.y) * moveSpeed / Math.abs(player.y - playerTargetY);
+            } else {
+                player.y = playerTargetY;
+            }
+        }
+
+        function moveBoss() {
+            if (boss.y < 200) {
+                boss.y += scrollSpeed;
+            } else {
+                boss.x += boss.speed * boss.direction;
+                if (boss.x <= 0 || boss.x + boss.width >= canvas.width) {
+                    boss.direction *= -1;
+                }
+            }
+        }
+
+        function shootBossShot() {
+            if (boss.y >= 200) {
+                let angle = Math.atan2(player.y - boss.y, player.x - boss.x); // ホーミング角度
+                let speed = 4;
+                bossShots.push({
+                    x: boss.x + boss.width / 2, 
+                    y: boss.y + boss.height / 2, 
+                    width: 10, 
+                    height: 10, 
+                    speedX: Math.cos(angle) * speed, 
+                    speedY: Math.sin(angle) * speed
+                });
+            }
+        }
+
+        function checkCollision(rect1, rect2) {
+            return (
+                rect1.x < rect2.x + rect2.width &&
+                rect1.x + rect1.width > rect2.x &&
+                rect1.y < rect2.y + rect2.height &&
+                rect1.y + rect1.height > rect2.y
+            );
+        }
+
+        function update() {
+            if (gameOver) return;
+
+            movePlayer();
+            moveBoss();
+
+            gates.forEach((gate, index) => {
+                gate.y += scrollSpeed;
+                if (checkCollision(player, gate)) {
+                    if (gate.type === "increase") {
+                        player.power += gate.amount;
+                    } else if (gate.type === "decrease") {
+                        player.power -= gate.amount;
+                    } else if (gate.type === "multiply") {
+                        player.power *= gate.amount;
+                    } else if (gate.type === "divide") {
+                        player.power = Math.floor(player.power / gate.amount);
+                    }
+
+                    powerDisplay.textContent = player.power;
+                    gates.splice(index, 1);
+
+                    if (player.power < 0) {
+                        alert("💀 ゲームオーバー！攻撃力がマイナスになった...");
+                        location.reload();
+                    }
+                }
+            });
+
+            if (checkCollision(player, boss)) {
+                gameOver = true;
+                if (player.power >= boss.hp) {
+                    alert(`🎉 勝利！坪内先生を倒した！（ボスHP: ${boss.hp}）`);
+                } else {
+                    alert(`💀 敗北！坪内先生HPは ${boss.hp} だった...`);
+                }
+                location.reload();
+            }
+
+            bossShots.forEach((shot, index) => {
+                shot.x += shot.speedX;
+                shot.y += shot.speedY;
+
+                if (checkCollision(player, shot)) {
+                    gameOver = true;
+                    alert("💀 坪内先生の遠距離攻撃に当たった！ゲームオーバー！");
+                    location.reload();
+                }
+
+                if (shot.x < 0 || shot.x > canvas.width || shot.y > canvas.height) {
+                    bossShots.splice(index, 1);
+                }
+            });
+
+            gates = gates.filter(gate => gate.y < canvas.height);
+
+            if (Math.random() < 0.02) createGate(-20);
+
+            shotTimer++;
+            if (shotTimer >= shotInterval) {
+                shootBossShot();
+                shotTimer = 0;
+            }
+        }
+
+        function draw() {
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = "green";
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+
+            gates.forEach(gate => {
+                ctx.fillStyle = gate.color;
+                ctx.fillRect(gate.x, gate.y, gate.width, gate.height);
+                ctx.fillStyle = "white";
+                ctx.font = "16px Arial";
+                let symbol = gate.type === "increase" ? "+"
+                           : gate.type === "decrease" ? "-"
+                           : gate.type === "multiply" ? "×"
+                           : "÷";
+                ctx.fillText(`${symbol}${gate.amount}`, gate.x + 30, gate.y + 15);
+            });
+
+            // プレイヤーの描画
+            if (playerImageLoaded) {
+                ctx.drawImage(playerImage, player.x, player.y, player.width, player.height); // 画像をボスの位置に描画
+            } else {
+                // ボプレイヤーの画像が読み込まれる前に描画する場合、代わりに矩形を描画
+                ctx.fillStyle = "black";
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+            }
+            // ボスの描画
+            if (bossImageLoaded) {
+                ctx.drawImage(bossImage, boss.x, boss.y, boss.width, boss.height); // 画像をボスの位置に描画
+            } else {
+                // ボスの画像が読み込まれる前に描画する場合、代わりに矩形を描画
+                ctx.fillStyle = "black";
+                ctx.fillRect(boss.x, boss.y, boss.width, boss.height);
+            }
+
+            ctx.fillStyle = "black";
+            ctx.font = "20px Arial";
+            ctx.fillText(`BOSS (${boss.hp})`, boss.x + 10, boss.y - 10);
+
+            bossShots.forEach(shot => {
+                ctx.fillStyle = "red";
+                ctx.fillRect(shot.x, shot.y, shot.width, shot.height);
+            });
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        let keys = {};
+        window.addEventListener("keydown", e => keys[e.key] = true);
+        window.addEventListener("keyup", e => keys[e.key] = false);
+
+        gameLoop();
+    </script>
+
 </body>
 </html>
